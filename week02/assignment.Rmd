@@ -1,0 +1,97 @@
+---
+title: "Week 2 Epigen2023"
+author: "Kian Bigović Villi"
+date: '03 03 2023 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(ensembldb)
+  library(GenomicRanges)
+  library(epiwraps)
+})
+```
+
+Using AnnotationHub, find and download the following annotations data:
+
+```{r}
+ah <- AnnotationHub()
+```
+
+○ The mouse (Mus Musculus) EnsDb object, version 102, genome build GRCm38
+```{r}
+# Query the AH for mouse EnsDB for version 102, GRCm38
+Mus_ensdb_query <- query(ah, c("Mus musculus","GRCm38", "102", "ensembl", "EnsDB"))
+Mus_ensdb_query
+#Get the file from the AH
+Mus_ensdb <- ah[[Mus_ensdb_query$ah_id]]
+Mus_ensdb
+```
+
+○ The mouse genome sequence ( dna_sm ) in TwoBit/2bit format for GRCm38
+```{r}
+#Query the AH for mouse dna_sm in 2bit format
+Mus_2bit_query <- query(ah, c("Mus musculus","GRCm38", "102", "ensembl", "dna_sm"))
+Mus_2bit_query
+#Get the file 
+Mus_2bit <- ah[[Mus_2bit_query$ah_id]]
+Mus_2bit
+
+#Alternatively, we could have just done the followign query and read out the identifiers
+Mus_all_query <- query(ah, c("Mus musculus","GRCm38", "102", "ensembl"))
+Mus_all_query
+```
+
+○ The drosophila melanogaster genome sequence ( dna_sm ) in TwoBit/2bit format for BDGP6
+
+```{r}
+#Query the AH for Drosopila, dna_sm, and BDGP6
+Drosophila_query <- query(ah, c("Drosophila melanogaster","BDGP6","dna_sm"))
+Drosophila_query
+#As here we don't have enough data to specify a single one I'll take the bottom one
+Drosophila_2bit <- ah[["AH106160"]]
+Drosophila_2bit
+
+```
+
+How many different ensembl gene IDs and gene symbols are there for protein-coding genes?
+```{r}
+#Get protein coding genes from the ensDB
+Mus_prot_genes <- genes(Mus_ensdb,filter = GeneBiotypeFilter("protein_coding"), columns = c("gene_id","symbol"))
+Mus_prot_genes
+
+#Get the gene metadata -> this step is redundant as one can directly use Mus_prot_genes$gene_id/symbol
+prot_gene_metadata <- mcols(Mus_prot_genes)
+
+#Get the numeber of unique gene ids
+unique_ids <- unique(prot_gene_metadata$gene_id)
+print(paste("Number of unique gene ids is",length(unique_ids)))
+
+#Get the number of unique gene symbols
+unique_symbold <- unique(prot_gene_metadata$symbol)
+print(paste("Number of unique gene symbols is",length(unique_symbold)))
+```
+○ Plot the distribution of the (spliced) length of protein-coding transcripts
+```{r}
+#Get exons from the protein coding transcripts
+prot_transcripts <- exonsBy(Mus_ensdb, column=c("tx_id","tx_biotype"), 
+                    filter=TxBiotypeFilter("protein_coding"))
+prot_transcripts
+
+#Get widths of exons within the Granges list
+widths <- width(prot_transcripts)
+widths
+#Sum them for each sequence
+spliced_lengths <- sum(widths)
+
+#Plot the distribution
+hist(spliced_lengths, breaks = 100)
+```
+
