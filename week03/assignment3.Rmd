@@ -1,0 +1,90 @@
+---
+title: "Week 3 assignemnent"
+author: "Kian Bigović Villi"
+date: '11 03 2023 '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(Rsubread)
+  library(rtracklayer)
+  library(Biostrings)
+  library(Rfastp)
+  library(epiwraps)
+})
+ah <- AnnotationHub()
+```
+
+```{r, eval = FALSE}
+#Set the timeout options for the download 
+options(timeout = 6000)
+#Create the directory for the raw data
+dir.create("raw")
+#Download CTCF Chip-seq data
+download.file("https://www.encodeproject.org/files/ENCFF127RRR/@@download/ENCFF127RRR.fastq.gz", dest="raw/CTCF.fastq.gz")
+
+```
+```{r}
+#Create the trimmed directory
+dir.create("rfastp_trimmed")
+#Run the qc and trimmming
+qc <- Rfastp::rfastp("raw/CTCF.fastq.gz", thread=4, overrepresentationAnalysis=TRUE,
+                 outputFastq="rfastp_trimmed/CTCF")
+```
+
+```{r, eval=FALSE}
+# we get the genome sequence from AnnotationHub
+genome <- ah[["AH49674"]]
+# we create a new directory that will contain the genome index
+dir.create("BDGP6_genome")
+# we write the genome sequence in fasta format
+export(import.2bit(genome), "BDGP6_genome/genome.fasta.gz", compress=TRUE)
+# we build a Rsubread index
+Rsubread::buildindex("BDGP6_genome/rsubread", reference="BDGP6_genome/genome.fasta.gz")
+```
+
+```{r}
+#Create a directory for the aligned sequene
+dir.create("aligned")
+#Align the sequences to the genome
+align.stats <- Rsubread::align(index = "BDGP6_genome/rsubread", type = "dna",
+                               readfile1 = "rfastp_trimmed/CTCF_R1.fastq.gz",
+                               output_file = "aligned/CTCF.bam",
+                               nthreads = 6,
+                               sortReadsByCoordinates = TRUE)
+
+```
+
+```{r}
+align.stats
+print(paste("We have", align.stats[2,],"reads out of total",align.stats[1,],"reads, making the mapping percentage", align.stats[2,]/align.stats[1,]))
+```
+
+
+```{r,}
+dir.create("peaks/")
+#Get the peaks file, from the qc we can see that the read length is 36
+peaks <- callPeaks("aligned/CTCF.bam", fragLength=50L)
+# Save the file as bed
+```
+
+
+```{r,eval=FALSE}
+rtracklayer::export.bed(peaks, "peaks/CTCF_peaks.bed")
+
+```
+
+```{r}
+print(paste("We have",length(peaks),"peaks in the data"))
+head(peaks)
+region <- as.character(granges(peaks[30]))
+plotSignalTracks("aligned/CTCF.bam", region=region)
+```
+
+
