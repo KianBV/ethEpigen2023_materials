@@ -1,0 +1,58 @@
+---
+title: "assignment"
+author: "Kian Bigović Villi"
+date: "2023-03-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressMessages(
+  library(GenomicRanges)
+)
+```
+
+```{r}
+#Define the links to the datasets and appropriate file names
+download_links <- c("https://www.encodeproject.org/files/ENCFF460EOA/@@download/ENCFF460EOA.bed.gz",
+                    "https://www.encodeproject.org/files/ENCFF274UIB/@@download/ENCFF274UIB.bed.gz",
+                    "https://www.encodeproject.org/files/ENCFF008XKX/@@download/ENCFF008XKX.bed.gz",
+                    "https://www.encodeproject.org/files/ENCFF426IIV/@@download/ENCFF426IIV.bed.gz",
+                    "https://www.encodeproject.org/files/ENCFF974BMC/@@download/ENCFF974BMC.bed.gz")
+dataset_names <-c("p300",
+                "H3K27ac",
+                "H3K27me3",
+                "H3K4me1",
+                "H3K4me3")
+
+file_names <- paste(dataset_names, ".narrowPeak.gz", sep = "")
+```
+
+
+```{r, eval = FALSE}
+#Download the files
+mapply(download.file, download_links,file_names)
+```
+
+
+```{r}
+#Load the files as a list of GRanges objects and name them
+datasets <- lapply(file_names, rtracklayer::import)
+names(datasets) <- dataset_names
+```
+
+```{r}
+#Save the number of peaks in p300
+p300_peak_nr <- length(datasets[["p300"]])
+#Go over the datasets and get the number of ovelapping p300 peaks
+p300_overlaps <- sapply(dataset_names[-1], FUN = function(x){
+  sum(overlapsAny(datasets[["p300"]], datasets[[x]]))
+})
+#Calculate the percentage
+p300_overlaps_perc <- p300_overlaps / p300_peak_nr
+p300_overlaps_perc
+```
+
