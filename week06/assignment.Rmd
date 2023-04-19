@@ -1,0 +1,86 @@
+---
+title: "Week 7"
+author: "Kian Bigović Villi"
+date: "2023-04-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(AnnotationHub)
+  library(GenomicRanges)
+  library(ggplot2)
+  #library(memes) # for the meme-based methods -- COMMENT OUT when using alternatives
+  library(motifmatchr)
+  library(Biostrings) # for handling sequences
+  library(MotifDb) # database of motifs
+  library(TFBSTools) # for handling some motif formats
+  library(universalmotif) # for converting motifs to various formats
+  library(PWMEnrich) # for R-based motif enrichment analysis
+})
+
+```
+
+```{r}
+#Download the data
+download.file("https://www.encodeproject.org/files/ENCFF196HUO/@@download/ENCFF196HUO.bed.gz",
+              "REST_C2C12_Chip_seq.bed.gz")
+#Get the peaks from the file
+peaks <- rtracklayer::import("REST_C2C12_Chip_seq.bed.gz", format="NarrowPeak")
+seqlevelsStyle(peaks) <- "Ensembl"
+#Remove the unplaced sequences from this assembly
+peaks <- peaks[seqnames(peaks) == 1]
+```
+
+```{r}
+#Search the REST motifs 
+possible_motifs <- query(MotifDb, "REST")
+#Look at the names of the known REST motifs
+names(possible_motifs)
+#Pick one of the motifs
+REST_motif <- possible_motifs[["Mmusculus-HOCOMOCOv10-REST_MOUSE.H10MO.A"]]
+#Look at the motif 
+view_motifs(REST_motif)
+#Change the motif format
+REST_motif2 <- convert_motifs(REST_motif, class="TFBSTools-PFMatrix")
+
+```
+
+```{r}
+#Take the region around the peak centers
+peak_center <- resize(peaks, fix="center", width=100)
+
+#Scan the peak center sequences using the REST motif
+REST_occurances_peaks <- motifmatchr::matchMotifs(REST_motif2, subject = peak_center, 
+                                               genome=Rsamtools::FaFile("genome.fa"), 
+                                               out="positions")[[1]]
+
+#Load the genome
+ah <- AnnotationHub(localHub=TRUE)
+genome <- ah[["AH68356"]]
+genome <- rtracklayer::import(genome)
+#Scan the genome chr1 for the motif in question
+REST_occurances_genome <- motifmatchr::matchMotifs(REST_motif2, 
+                                                   subject= genome[["1"]],
+                                                   out="positions")[[1]]
+```
+
+```{r}
+#Number of peaks with the motif
+pm_nr <- length(REST_occurances_peaks)/length(peaks)
+print(paste("of the ",length(peaks)," peaks, ",
+            length(REST_occurances_peaks)," ("
+            , round(pm_nr,3),"%) contain a motif", sep = ""))
+#Number of motifs bound by the tf
+gm_nr <- length(REST_occurances_peaks)/length(REST_occurances_genome[[1]])
+print(paste("of the ",length(REST_occurances_genome[[1]])," motif instances, ",
+            length(REST_occurances_peaks)," ("
+            , round(gm_nr,3),"%) overlap a peak", sep = ""))
+
+
+```
+
