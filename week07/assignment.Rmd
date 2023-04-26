@@ -1,0 +1,73 @@
+---
+title: "assignment"
+author: "Kian Bigović Villi"
+date: "2023-04-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(AnnotationHub)
+  library(MotifDb)
+  library(universalmotif)
+  library(ensembldb)
+  library(ggplot2)
+})
+
+ah <- AnnotationHub(localHub=TRUE)
+ensdb <- ah[["AH89211"]] # mouse ensembldb object
+```
+
+```{r}
+#Get genome and chr19 sequence
+genome <- ah[["AH68356"]]
+chr19 <- import(genome)["19"]
+
+# get KFL4 motif
+KFL4_motif <- query(MotifDb, c("KLF4","Mus"))[[1]]
+KFL4_motif2 <- convert_motifs(KFL4_motif, class="TFBSTools-PFMatrix")
+
+# get MAZ motif
+GATA6_motif <- query(MotifDb, c("GATA6","Mus"))[[1]]
+GATA6_motif2 <- convert_motifs(GATA6_motif, class="TFBSTools-PFMatrix")
+# Put them in a list (could have done earlier, but oh well)
+Motifs <- list(KFL4_motif2, GATA6_motif2)
+names(Motifs)<-c("KFL4", "GATA6")
+
+# find motif occurences for both motifs
+moi <- lapply(Motifs, FUN = function(motif){
+  mo <- motifmatchr::matchMotifs(motif, chr19, out="positions", p.cutoff=1e-5)[[1]]
+  mo <- as(setNames(mo,names(chr19)), "GRanges")
+  mo
+})
+```
+
+```{r}
+#Create Mono-nucleosome cuts
+bam2bw(bamfile = "atac.chr19.bam", output_bw = "mono_cuts.bw", paired=TRUE, binWidth=5L, minFragLength=140,
+       maxFragLength=220, type="ends", shift=c(4L,-5L), forceSeqlevelsStyle = "Ensembl")
+#Set up the tracks
+tracks <- c("NF cuts"="NF_cuts.bw", "Mono cuts"="mono_cuts.bw")
+
+
+```
+
+```{r}
+#Plot the signals 
+lapply(moi, FUN = function(x){
+  #Zoom to the motif regions 
+  sm <- signal2Matrix(tracks, x, w=5, extend=500)
+  #Normalize it
+  nf <- bwNormFactors(tracks, useSeqLevels="19", nwind=5000L)
+  # Apply the normalization
+  smb <- rescaleSignalMatrices(sm, nf)
+  #Plot it
+  plotEnrichedHeatmaps(smb, trim=0.95, colors = c("white","darkred"))
+})
+```
