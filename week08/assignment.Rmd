@@ -1,0 +1,132 @@
+---
+title: "Week8"
+author: "Kian Bigović Villi"
+date: "2023-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(epiwraps)
+  library(motifmatchr)
+  library(MotifDb)
+  library(universalmotif)
+  library(sechm)
+  library(BiocParallel)
+  library(ggplot2)
+  library(chromVAR) # for motif accessibility estimation
+  library(SummarizedExperiment) # data structure
+  library(limma) # for statistical analysis
+})
+
+register(SerialParam())
+
+```
+
+```{r}
+#Download the SE data
+options(timeout=6000)
+download.file("https://ethz-ins.org/content/mouse_mm38_hippocampus.peakCounts.SE.rds",
+              "mouse_hipopocampus_SE.rds", mode="wb")
+se <- readRDS("mouse_hipopocampus_SE.rds")
+se
+#Define the sex and condition of the data
+colData(se)$sex <- c(rep("Female",3), rep("Male",3),
+                            rep("Female",3), rep("Male",3))
+colData(se)$condition <- c(rep("Control",6), rep("FSS",6))
+```
+```{r}
+#To add the GC bias, load the genome
+genome <- BSgenome.Mmusculus.UCSC.mm10::BSgenome.Mmusculus.UCSC.mm10
+#Change the naming convention to the UCSC one
+seqlevelsStyle(se) = "UCSC"
+#Add the bias
+se <- suppressWarnings(chromVAR::addGCBias(se, genome=genome))
+```
+
+```{r}
+#To do the motif analysis we need a set of motifs to use
+motifs <- query(MotifDb, c("Mmusculus", "HOCOMOCOv10"))
+motifs <- do.call(TFBSTools::PWMatrixList, setNames(
+           universalmotif::convert_motifs(motifs, class="TFBSTools-PWMatrix"),
+           mcols(motifs)$providerName))
+#Find the peaks containing the genomes
+moi <- suppressWarnings(motifmatchr::matchMotifs(motifs, subject=se, genome=genome))
+moi
+```
+
+```{r}
+#Compute the deviations in accessibility for each set of peaks
+dev <- chromVAR::computeDeviations(object = se, annotations=moi,
+                                   background_peaks=getBackgroundPeaks(se, niterations=1000))
+
+#Compute the variablility of the deviations
+variability <- computeVariability(dev)
+#Plot the ranked variablities
+plotVariability(variability)
+
+```
+
+From the plot its possible to see that the data contains generally moderate variability for all TFs. With there being a group of around top 40 with high variability, and the rest following a slow downwards trend.
+
+Time to do the differential analysis, first for sex then for condition
+```{r}
+#Add the normalized variablity z scores to the dev table
+assays(dev)$norm <- scale(assays(dev)$z)
+#Define the factors and organize so Control is base level
+dev$condition <- factor(dev$condition)
+dev$condition <- relevel(dev$condition, "Control")
+#Set up the model matrix using condition as coefficient
+mm_cond <- model.matrix(~dev$condition)
+
+#Fit the linear model and get the stats using empirical Bayes moderation
+fit_cond <- eBayes(lmFit(assays(dev)$norm, mm_cond))
+#Extract the sorted list of the hits
+res_cond <- as.data.frame(topTable(fit_cond, coef="dev$conditionFSS", number = Inf))
+
+#Add the names and keep only the TF name 
+res_cond$Names <- gsub("\\_.*","",row.names(res_cond))
+#Plot it
+ggplot(res_cond, aes(x = logFC, y = -log10(adj.P.Val), label=Names)) + 
+  geom_text()+
+  theme_bw()
+#Report top 50 significant hits
+top_cond <- head(res_cond[res_cond$adj.P.Val<=0.5,], 50)
+
+#Plot the heatmap
+sechm(dev, features = row.names(top_cond), assayName="norm", top_annotation = c("condition", "depth"))
+```
+
+Looking at both the volcano and the heatmap one can conclude that there are only two TFs with significantly different accessability between the control and force swim condition. This would indicate that such a treatment doesn't elicit a wide response, atleast from an epigenomic perspective.
+```{r}
+#Add the normalized variablity z scores to the dev table
+assays(dev)$norm <- scale(assays(dev)$z)
+#Define the factors and organize so Male is base level
+dev$sex <- factor(dev$sex)
+dev$sex <- relevel(dev$sex, "Male")
+#Set up the model matrix using sex as coefficient
+mm_sex <- model.matrix(~dev$sex)
+
+#Fit the linear model and get the stats using empirical Bayes moderation
+fit_sex <- eBayes(lmFit(assays(dev)$norm, mm_sex))
+#Extract the sorted list of the hits
+res_sex <- as.data.frame(topTable(fit_sex, coef="dev$sexFemale", number = Inf))
+
+#Add the names and keep only the TF name 
+res_sex$Names <-  gsub("\\_.*","",row.names(res_sex))
+#Plot it
+ggplot(res_sex, aes(logFC, -log10(adj.P.Val), label=Names)) + geom_text() 
+
+#Report the top 50 significant hits
+top_sex <- head(res_sex[res_sex$adj.P.Val<=0.5,], 50)
+top_sex
+#Plot the heatmap
+sechm(dev, features = rownames(top_sex), assayName="norm", top_annotation = c("sex", "depth"))
+
+```
+
+In this case we can see a lot more variability, indicating there is a lot of variability in motif accessibility between the two sexes. This is especially exemplified when compared to the Control vs FSS analysis we did previously. Thus, there is a significant difference between the male and female hipocampus epigenomic behaviour, regardless of their condition (w.r.t. the conditions used in the given study) 
